@@ -39,8 +39,10 @@
 #include "HomeSpan.h" 
 #include "DEV_Sensors.hpp"
 #include <Arduino.h>
-#include <Mhz19.h>
 #include <SoftwareSerial.h>
+
+#define BUTTON_PIN	   0
+#define LED_STATUS_PIN 2
 
 DEV_CO2Sensor		 *CO2; // GLOBAL POINTER TO STORE SERVICE
 extern "C++" bool needToWarmUp;
@@ -54,23 +56,15 @@ void setup() {
 	homeSpan.setLogLevel(1);								   // set log level
 	homeSpan.setPortNum(88);								   // change port number for HomeSpan so we can use port 80 for the Web Server
 	homeSpan.setStatusAutoOff(10);							   // turn off status led after 10 seconds of inactivity
-	homeSpan.setWifiCallback(setupWeb);						   // need to start Web Server after WiFi is established
-	homeSpan.reserveSocketConnections(3);					   // reserve 3 socket connections for Web Server
 	homeSpan.enableWebLog(10, "pool.ntp.org", "UTC", "myLog"); // enable Web Log
 	homeSpan.enableAutoStartAP();							   // enable auto start AP
-	homeSpan.setSketchVersion(fw_ver);
 
-	homeSpan.begin(Category::Bridges, "HomeSpan Air Sensor Bridge");
-
-	new SpanAccessory();
-	new Service::AccessoryInformation();
-	new Characteristic::Identify();
-	new Characteristic::FirmwareRevision(temp.c_str());
+	homeSpan.begin(Category::Sensors, "Zis's CO2 Meter");
 
 	new SpanAccessory();
 	new Service::AccessoryInformation();
 	new Characteristic::Identify();
-	new Characteristic::Name("Carbon Dioxide Sensor");
+	new Characteristic::Name("Zis's CO2 Meter");
 	CO2 = new DEV_CO2Sensor(); // Create a CO2 Sensor (see DEV_Sensors.h for definition)
 }
 

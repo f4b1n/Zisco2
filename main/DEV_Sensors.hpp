@@ -1,43 +1,39 @@
 #include <TFT_eSPI.h>
 #include <HomeSpan.h>
 #include <SoftwareSerial.h>
-#include <ErriezMHZ19B.h> //check this
-#include "SerialCom.hpp"
+#include <Mhz19.h>
+#include <SerialCom.h>
 #include "Types.hpp"
 #include <Smoothed.h>
+#include "Roboto20.h"
+#include "Roboto70.h"
+#include "Roboto40.h"
 
 
-// I2C for temp sensor
-#include <Wire.h>
-#define si7021Addr			 0x40 // I2C address for temp sensor
-
-#define MHZ19B_TX_PIN		 19 //update pin
-#define MHZ19B_RX_PIN		 18 //update pin
+#define MHZ19_TX_PIN		 17 //update pin
+#define MHZ19_RX_PIN		 13 //update pin
 #define INTERVAL			 10	  // in seconds
 #define HOMEKIT_CO2_TRIGGER	 1350 // co2 level, at which HomeKit alarm will be triggered
-
-
-#define ADC_EN              14  //ADC_EN is the ADC detection enable port
-#define ADC_PIN             34
-
-TFT_eSPI tft = TFT_eSPI(135, 240); // Invoke custom library
+#define SMOOTHING_COEFF		 10  // Number of elements in the vector of previous values
 
 bool				  needToWarmUp	= true;
 int					  tick			= 0;
+
+particleSensorState_t state;
 Smoothed<float>		  mySensor_co2;
 
 // Declare functions
-void   detect_mhz();
 
 ////////////////////////////////////
 //   DEVICE-SPECIFIC LED SERVICES //
 ////////////////////////////////////
 
 // Use software serial
-SoftwareSerial mhzSerial(MHZ19B_TX_PIN, MHZ19B_RX_PIN);
+SoftwareSerial mhzSerial(MHZ19_TX_PIN, MHZ19_RX_PIN);
+Mhz19 sensor;
 
-// Declare MHZ19B object
-ErriezMHZ19B mhz19b(&mhzSerial);
+TFT_eSPI tft = TFT_eSPI(135, 240); // Invoke custom library
+
 
 struct DEV_CO2Sensor : Service::CarbonDioxideSensor { // A standalone Temperature sensor
 
@@ -57,22 +53,36 @@ struct DEV_CO2Sensor : Service::CarbonDioxideSensor { // A standalone Temperatur
 
 		mhzSerial.begin(9600);
 
+    sensor.begin(&mhzSerial);
+
+    tft.init();
+    tft.setRotation(1);
+    tft.fillScreen(TFT_BLACK);
+
 		// Enable auto-calibration
-		mhz19b.setAutoCalibration(true);
+    sensor.setMeasuringRange(Mhz19MeasuringRange::Ppm_5000);
+    sensor.enableAutoBaseCalibration();
 
 		mySensor_co2.begin(SMOOTHED_EXPONENTIAL, SMOOTHING_COEFF); // SMOOTHED_AVERAGE, SMOOTHED_EXPONENTIAL options
 	}
 
 	void loop() {
 
+    int h = tft.height();
+    int w = tft.width();   
+    tft.loadFont(Roboto40);
+
+
 		if (co2StatusActive->timeVal() > 5 * 1000 && needToWarmUp) {
 			// Serial.println("Need to warm up");
 
-			if (mhz19b.isWarmingUp()) {
+			if (!sensor.isReady()) {
 				Serial.println("Warming up");
-				tft.setTextColor(TFT_RED);
-				tft.drawString("warming up", tft.width()/2, tft.height()/2-32);
+				tft.setTextColor(TFT_RED, TFT_BLACK);
+				tft.drawString("warming up ", 20, 20);
+        tft.drawString(String(tick) + " s", w / 3, 70);
 				delay(2.5 * 1000);
+        tft.fillScreen(TFT_BLACK);
 				tick = tick + 5;
 				Serial.println((String)tick + " ");
 				co2StatusActive->setVal(false);
@@ -81,16 +91,16 @@ struct DEV_CO2Sensor : Service::CarbonDioxideSensor { // A standalone Temperatur
 				co2StatusActive->setVal(true);
 				Serial.println("Is warmed up");
 				tft.setTextColor(TFT_GREEN);
-				tft.drawString("warmed up", tft.width()/2, tft.height()/2-32);
+				tft.drawString("warmed up", 10, h / 2 - 32);
 			}
 		}
 
 		if (co2Level->timeVal() > INTERVAL * 1000 && !needToWarmUp) { // check time elapsed since last update and proceed only if greater than 5 seconds
 
-			float co2_value;
+      auto co2_value = sensor.getCarbonDioxide();
 
-			if (mhz19b.isReady()) {
-				co2_value = mhz19b.readCO2();
+			if (sensor.isReady()) {
+				auto co2_value = sensor.getCarbonDioxide();
 			}
 
 			if (co2_value >= 400) {
@@ -101,6 +111,7 @@ struct DEV_CO2Sensor : Service::CarbonDioxideSensor { // A standalone Temperatur
 				LOG1(co2_value);
 				LOG1(" ppm\n");
 
+        tft.fillScreen(TFT_BLACK);
 				mySensor_co2.add(co2_value);
 
 				co2Level->setVal(mySensor_co2.get()); // set the new co value; this generates an Event Notification and also resets the elapsed time
@@ -114,17 +125,25 @@ struct DEV_CO2Sensor : Service::CarbonDioxideSensor { // A standalone Temperatur
 				// 1000+        -> red
 				if (co2_value >= 1000) {
 					LOG1("Red\n");
-					tft.setTextColor(TFT_RED); // red color
-					String co2_string = String(co2_value) + "co2";
-          			tft.drawString(co2_string, tft.width() / 2, tft.height() / 2 - 32);
+          tft.unloadFont();
+          tft.loadFont(Roboto70);
+					tft.setTextColor(TFT_RED, TFT_BLACK); // red color
+					String co2_string = String(co2_value);;
+          tft.drawString(co2_string, 20, h / 2 - 32);
+          tft.unloadFont();
+          tft.loadFont(Roboto20);          
+          tft.drawString("co2", 190, h / 3 + 5);
+          tft.drawString("ppm", 190, h / 2 + 5);
+
+
 				} else if (co2_value >= 800) {
 					LOG1("Yellow\n");
-					String co2_string = String(co2_value) + "co2";
-          			tft.drawString(co2_string, tft.width() / 2, tft.height() / 2 - 32);
+					String co2_string = String(co2_value) + " co2";
+          tft.drawString(co2_string, 20, tft.height() / 2 - 32);
 				} else if (co2_value >= 400) {
 					LOG1("Green color\n");
-					String co2_string = String(co2_value) + "co2";
-          			tft.drawString(co2_string, tft.width() / 2, tft.height() / 2 - 32);
+					String co2_string = String(co2_value) + " co2";
+          tft.drawString(co2_string, 20, tft.height() / 2 - 32);
 				}
 
 				// Update peak value
@@ -147,14 +166,3 @@ struct DEV_CO2Sensor : Service::CarbonDioxideSensor { // A standalone Temperatur
 	}
 };
 
-// HELPER FUNCTIONS
-
-void detect_mhz() {
-	// Detect sensor
-	Serial.println("Detecting MH-Z19B");
-	while (!mhz19b.detect()) {
-		tft.setTextColor(TFT_RED);
-        tft.drawString("Detecting MH-Z19B", tft.width() / 2, tft.height() / 2 - 32);
-	};
-	Serial.println("Sensor detected!");
-}
